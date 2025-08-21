@@ -1,0 +1,16 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "Screenshot AI Studio"
+authors = ["your-name"]
+license = ""
+repository = ""
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.4", features = [] }
+
+[dependencies]
+tauri = { version = "1.4", features = [ "dialog-confirm", "global-shortcut-all", "dialog-save", "dialog-open", "dialog-message", "notification-all", "system-tray", "clipboard-all", "shell-open", "path-all", "os-all", "fs-all", "dialog-ask", "http-all"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
