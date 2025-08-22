@@ -1,4 +1,4 @@
-// src/App.tsx
+// Updated src/App.tsx with image thumbnails and viewer
 
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9,6 +9,7 @@ import { listen } from '@tauri-apps/api/event';
 // Components
 import DropZone from './components/DropZone';
 import ServerConfig from './components/ServerConfig';
+import ImageViewer from './components/ImageViewer';
 
 // Types
 interface Screenshot {
@@ -20,6 +21,7 @@ interface Screenshot {
   status: 'processing' | 'completed' | 'error';
   analysis?: string;
   source?: string;
+  imageData?: string; // base64 image data
 }
 
 interface ProcessingResponse {
@@ -39,89 +41,89 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
   const [activeTab, setActiveTab] = useState<ActiveTab>('gallery');
+  const [selectedScreenshot, setSelectedScreenshot] = useState<Screenshot | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
 
   // Load existing screenshots and listen for new ones
-  // In your src/App.tsx, modify the useEffect to add logging:
+  useEffect(() => {
+    let unlistenFunction: (() => void) | null = null;
 
-  // Replace the useEffect in your App.tsx with this fixed version:
+    // Load existing screenshots
+    const loadScreenshots = async () => {
+      try {
+        const existing = await invoke<any[]>('get_recent_screenshots');
+        console.log('🔍 Loaded existing screenshots:', existing.length, existing);
+        setScreenshots(existing.map(item => ({
+          id: item.id,
+          name: item.name,
+          size: item.size,
+          type: item.type,
+          timestamp: item.timestamp,
+          status: item.status,
+          analysis: item.analysis,
+          source: item.source,
+          imageData: item.imageData // Include image data if available
+        })));
+      } catch (error) {
+        console.error('Failed to load screenshots:', error);
+      }
+    };
 
-useEffect(() => {
-  let unlistenFunction: (() => void) | null = null;
-
-  // Load existing screenshots
-  const loadScreenshots = async () => {
-    try {
-      const existing = await invoke<any[]>('get_recent_screenshots');
-      console.log('🔍 Loaded existing screenshots:', existing.length, existing);
-      setScreenshots(existing.map(item => ({
-        id: item.id,
-        name: item.name,
-        size: item.size,
-        type: item.type,
-        timestamp: item.timestamp,
-        status: item.status,
-        analysis: item.analysis,
-        source: item.source
-      })));
-    } catch (error) {
-      console.error('Failed to load screenshots:', error);
-    }
-  };
-
-  // Listen for new screenshots being processed
-  const setupListener = async () => {
-    const unlisten = await listen('screenshot-processed', (event) => {
-      console.log('📸 Received screenshot-processed event:', event.payload);
-      
-      const screenshotData = event.payload as any;
-      const newScreenshot: Screenshot = {
-        id: screenshotData.id,
-        name: screenshotData.name,
-        size: screenshotData.size,
-        type: screenshotData.type,
-        timestamp: screenshotData.timestamp,
-        status: screenshotData.status || 'completed',
-        analysis: screenshotData.analysis,
-        source: screenshotData.source || 'desktop_auto'
-      };
-      
-      console.log('📸 Adding new screenshot to state:', newScreenshot);
-      
-      setScreenshots(prev => {
-        console.log('📸 Current screenshots in setter:', prev.length);
+    // Listen for new screenshots being processed
+    const setupListener = async () => {
+      const unlisten = await listen('screenshot-processed', (event) => {
+        console.log('📸 Received screenshot-processed event:', event.payload);
         
-        // Check for duplicates by ID to prevent adding the same screenshot twice
-        const isDuplicate = prev.some(existing => existing.id === newScreenshot.id);
-        if (isDuplicate) {
-          console.log('🔄 Skipping duplicate screenshot with ID:', newScreenshot.id);
-          return prev;
-        }
+        const screenshotData = event.payload as any;
+        const newScreenshot: Screenshot = {
+          id: screenshotData.id,
+          name: screenshotData.name,
+          size: screenshotData.size,
+          type: screenshotData.type,
+          timestamp: screenshotData.timestamp,
+          status: screenshotData.status || 'completed',
+          analysis: screenshotData.analysis,
+          source: screenshotData.source || 'desktop_auto',
+          imageData: screenshotData.imageData // Include image data
+        };
         
-        const updated = [newScreenshot, ...prev];
-        console.log('📸 New screenshots count after add:', updated.length);
-        return updated;
+        console.log('📸 Adding new screenshot to state:', newScreenshot);
+        
+        setScreenshots(prev => {
+          console.log('📸 Current screenshots in setter:', prev.length);
+          
+          // Check for duplicates by ID to prevent adding the same screenshot twice
+          const isDuplicate = prev.some(existing => existing.id === newScreenshot.id);
+          if (isDuplicate) {
+            console.log('🔄 Skipping duplicate screenshot with ID:', newScreenshot.id);
+            return prev;
+          }
+          
+          const updated = [newScreenshot, ...prev];
+          console.log('📸 New screenshots count after add:', updated.length);
+          return updated;
+        });
       });
-    });
 
-    unlistenFunction = unlisten;
-    return unlisten;
-  };
+      unlistenFunction = unlisten;
+      return unlisten;
+    };
 
-  const initializeApp = async () => {
-    await loadScreenshots();
-    await setupListener();
-  };
+    const initializeApp = async () => {
+      await loadScreenshots();
+      await setupListener();
+    };
 
-  initializeApp();
+    initializeApp();
 
-  // Cleanup function
-  return () => {
-    if (unlistenFunction) {
-      console.log('🧹 Cleaning up screenshot event listener');
-      unlistenFunction();
-    }
-  };
-}, []); // Empty dependency array is correct here
+    // Cleanup function
+    return () => {
+      if (unlistenFunction) {
+        console.log('🧹 Cleaning up screenshot event listener');
+        unlistenFunction();
+      }
+    };
+  }, []);
 
   // Handle file uploads with new Rust backend
   const handleFilesDropped = useCallback(async (files: FileList) => {
@@ -135,6 +137,9 @@ useEffect(() => {
         continue;
       }
 
+      // Convert to base64 for thumbnail
+      const base64 = await fileToBase64(file);
+
       const screenshot: Screenshot = {
         id: `${Date.now()}-${i}`,
         name: file.name,
@@ -142,7 +147,8 @@ useEffect(() => {
         type: file.type,
         timestamp: new Date().toISOString(),
         status: 'processing',
-        source: 'frontend_upload'
+        source: 'frontend_upload',
+        imageData: base64 // Store image data for thumbnail
       };
 
       // Add to state
@@ -151,9 +157,6 @@ useEffect(() => {
       setProcessingCount(prev => prev + 1);
 
       try {
-        // Convert file to base64
-        const base64 = await fileToBase64(file);
-        
         // Process with Rust backend
         const result = await invoke<ProcessingResponse>('process_screenshot_direct', {
           imageBase64: base64,
@@ -212,6 +215,11 @@ useEffect(() => {
     });
   };
 
+  const handleScreenshotClick = (screenshot: Screenshot) => {
+    setSelectedScreenshot(screenshot);
+    setIsViewerOpen(true);
+  };
+
   const handleTestGreet = async () => {
     try {
       const result = await invoke('greet', { name: 'Desktop App' });
@@ -236,7 +244,7 @@ useEffect(() => {
   const getStatusColor = (status: Screenshot['status']) => {
     switch (status) {
       case 'processing': return '#ffa500';
-      case 'completed': return '#00ff88';
+      case 'completed': return '#40E0D0';
       case 'error': return '#ff4444';
       default: return '#888';
     }
@@ -434,13 +442,35 @@ useEffect(() => {
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.9 }}
                             transition={{ duration: 0.3 }}
+                            onClick={() => handleScreenshotClick(screenshot)}
                           >
-                            <div 
-                              className="screenshot-image"
-                              style={{ 
-                                background: `linear-gradient(135deg, ${getRandomGradient()})`
-                              }}
-                            />
+                            <div className="screenshot-image">
+                              {screenshot.imageData ? (
+                                <img
+                                  src={`data:${screenshot.type};base64,${screenshot.imageData}`}
+                                  alt={screenshot.name}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    objectPosition: 'center'
+                                  }}
+                                />
+                              ) : (
+                                <div
+                                  style={{ 
+                                    background: `linear-gradient(135deg, ${getRandomGradient()})`,
+                                    width: '100%',
+                                    height: '100%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                  }}
+                                >
+                                  📸
+                                </div>
+                              )}
+                            </div>
                             
                             <div className="screenshot-content">
                               <div className="screenshot-header">
@@ -474,13 +504,13 @@ useEffect(() => {
                               )}
                               
                               <div className="screenshot-actions">
-                                <button className="action-btn">
+                                <button className="action-btn" onClick={(e) => e.stopPropagation()}>
                                   📋 Copy
                                 </button>
-                                <button className="action-btn">
+                                <button className="action-btn" onClick={(e) => e.stopPropagation()}>
                                   🔗 Share
                                 </button>
-                                <button className="action-btn">
+                                <button className="action-btn" onClick={(e) => e.stopPropagation()}>
                                   ⭐ Save
                                 </button>
                                 <button className="expand-btn">View</button>
@@ -522,13 +552,35 @@ useEffect(() => {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
                             className="screenshot-card"
+                            onClick={() => handleScreenshotClick(screenshot)}
                           >
-                            <div 
-                              className="screenshot-image"
-                              style={{ 
-                                background: `linear-gradient(135deg, ${getRandomGradient()})`
-                              }}
-                            />
+                            <div className="screenshot-image">
+                              {screenshot.imageData ? (
+                                <img
+                                  src={`data:${screenshot.type};base64,${screenshot.imageData}`}
+                                  alt={screenshot.name}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    objectPosition: 'center'
+                                  }}
+                                />
+                              ) : (
+                                <div
+                                  style={{ 
+                                    background: `linear-gradient(135deg, ${getRandomGradient()})`,
+                                    width: '100%',
+                                    height: '100%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                  }}
+                                >
+                                  📸
+                                </div>
+                              )}
+                            </div>
                             
                             <div className="screenshot-content">
                               <div className="screenshot-header">
@@ -559,13 +611,13 @@ useEffect(() => {
                               )}
                               
                               <div className="screenshot-actions">
-                                <button className="action-btn">
+                                <button className="action-btn" onClick={(e) => e.stopPropagation()}>
                                   📋 Copy
                                 </button>
-                                <button className="action-btn">
+                                <button className="action-btn" onClick={(e) => e.stopPropagation()}>
                                   🔗 Share
                                 </button>
-                                <button className="action-btn">
+                                <button className="action-btn" onClick={(e) => e.stopPropagation()}>
                                   ⭐ Save
                                 </button>
                                 <button className="expand-btn">View</button>
@@ -649,6 +701,16 @@ useEffect(() => {
           </AnimatePresence>
         </main>
       </div>
+
+      {/* Image Viewer Modal */}
+      <ImageViewer
+        screenshot={selectedScreenshot}
+        isOpen={isViewerOpen}
+        onClose={() => {
+          setIsViewerOpen(false);
+          setSelectedScreenshot(null);
+        }}
+      />
     </div>
   );
 }

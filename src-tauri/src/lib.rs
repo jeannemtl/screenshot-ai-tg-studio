@@ -14,15 +14,16 @@ use once_cell::sync::OnceCell;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashSet, HashMap},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tauri::{AppHandle, Manager};
-use teloxide::{prelude::*, types::InlineKeyboardMarkup, Bot};
+use teloxide::{prelude::*, types::{InlineKeyboardMarkup, InputFile}, Bot};
 use tokio::{sync::{mpsc, RwLock}, time::sleep};
 use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
@@ -72,6 +73,7 @@ pub struct AnalysisData {
     pub metadata: ScreenshotMetadata,
     pub timestamp: DateTime<Utc>,
     pub source: String,
+    pub image_base64: String, // Store the original base64 data for thumbnails
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,7 +124,6 @@ pub struct ScreenshotProcessor {
     last_request_time: Arc<RwLock<Option<DateTime<Utc>>>>,
     telegram_bot: Option<Bot>,
 }
-
 impl ScreenshotProcessor {
     pub fn new(config: AppConfig) -> Self {
         let telegram_bot = config
@@ -167,7 +168,7 @@ impl ScreenshotProcessor {
         let brief_summary = self.get_brief_summary(&processed_image, source_type).await?;
         let content_analysis = self.analyze_for_content_type(&processed_image).await?;
 
-        // Store analysis data
+        // Store analysis data WITH original base64 for thumbnails
         let analysis_data = AnalysisData {
             image_data: processed_image,
             brief_summary: brief_summary.clone(),
@@ -175,6 +176,7 @@ impl ScreenshotProcessor {
             metadata: metadata.clone().unwrap_or_default(),
             timestamp: now,
             source: source_type.to_string(),
+            image_base64: image_base64.to_string(), // Store original base64
         };
 
         self.pending_analyses
@@ -436,7 +438,21 @@ FOLLOW_UP: [suggested follow-up actions]"#;
         };
 
         let timestamp = Utc::now().format("%H:%M:%S");
-        let short_caption = format!("<b>{} {}</b> <i>{}</i>", source_emoji, source_name, timestamp);
+        
+        // Truncate summary if too long for Telegram (1024 char limit for captions)
+        let header = format!("<b>{} {}</b> <i>{}</i>\n\n<b>AI Analysis:</b>\n\n", 
+                            source_emoji, source_name, timestamp);
+        
+        let max_summary_length = 950 - header.len(); // Leave some buffer for the header
+        let truncated_summary = if summary.len() > max_summary_length {
+            format!("{}...\n\n<i>[Analysis truncated - see full analysis in app]</i>", 
+                    &summary[..max_summary_length.min(summary.len())])
+        } else {
+            summary.to_string()
+        };
+        
+        // Create the caption for the photo
+        let caption = format!("{}{}", header, truncated_summary);
 
         // Create inline keyboard
         let mut buttons = vec![
@@ -459,15 +475,38 @@ FOLLOW_UP: [suggested follow-up actions]"#;
 
         let keyboard = InlineKeyboardMarkup::new(buttons);
 
-        // Send analysis as text message (simplified for now)
-        let full_message = format!("{}\n\n<b>AI Analysis:</b>\n\n{}", short_caption, summary);
+        // Get the image data from pending_analyses
+        if let Some(analysis_data) = self.pending_analyses.get(analysis_id) {
+            // Decode the base64 image data
+            let image_bytes = general_purpose::STANDARD
+                .decode(&analysis_data.image_data.base64_data)
+                .map_err(|e| anyhow!("Failed to decode image for Telegram: {}", e))?;
 
-        let chat_id: teloxide::types::ChatId = teloxide::types::ChatId(chat_id.parse::<i64>()?);
+            // Create InputFile from bytes
+            let input_file = InputFile::memory(image_bytes)
+                .file_name(format!("screenshot_{}.png", &analysis_id[..8]));
 
-        bot.send_message(chat_id, full_message)
-            .reply_markup(keyboard)
-            .parse_mode(teloxide::types::ParseMode::Html)
-            .await?;
+            let chat_id: teloxide::types::ChatId = teloxide::types::ChatId(chat_id.parse::<i64>()?);
+
+            // Send photo with caption and keyboard
+            bot.send_photo(chat_id, input_file)
+                .caption(caption)
+                .reply_markup(keyboard)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        } else {
+            // Fallback to text message if image data not found
+            warn!("Analysis data not found for ID: {}, sending text-only message", analysis_id);
+            
+            let full_message = format!("{}{}", header, truncated_summary);
+
+            let chat_id: teloxide::types::ChatId = teloxide::types::ChatId(chat_id.parse::<i64>()?);
+
+            bot.send_message(chat_id, full_message)
+                .reply_markup(keyboard)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
+        }
 
         Ok(())
     }
@@ -486,7 +525,8 @@ FOLLOW_UP: [suggested follow-up actions]"#;
                     "timestamp": analysis.timestamp,
                     "status": "completed",
                     "analysis": analysis.brief_summary,
-                    "source": analysis.source
+                    "source": analysis.source,
+                    "imageData": analysis.image_base64  // Include image data for thumbnails
                 })
             })
             .collect();
@@ -628,10 +668,10 @@ impl DesktopWatcher {
     pub fn new(processor: ScreenshotProcessor) -> Result<Self> {
         let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
         
-        // Track recently processed files to avoid duplicates - move this to the watcher level
-        let processed_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::<PathBuf>::new()));
+        // Track recently processed files to avoid duplicates
+        let processed_files = Arc::new(std::sync::Mutex::new(HashSet::<PathBuf>::new()));
         
-        // Spawn a task to handle file processing (simplified - no deduplication here)
+        // Spawn a task to handle file processing
         let processor_clone = processor.clone();
         let task_handle = tokio::spawn(async move {
             while let Some(path) = rx.recv().await {
@@ -646,61 +686,70 @@ impl DesktopWatcher {
         let processed_files_watcher = processed_files.clone();
         
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-            if let Ok(event) = res {
-                info!("🔍 File system event detected: {:?}", event.kind);
+    if let Ok(event) = res {
+        info!("🔍 File system event detected: {:?}", event.kind);
+        
+        // Process both Create events AND rename events (which create the final screenshot)
+        if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(notify::event::ModifyKind::Name(_))) {
+            for path in event.paths {
+                info!("🔍 Examining path: {}", path.display());
                 
-                // Listen to both Create and Modify events
-                if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-                    for path in event.paths {
-                        info!("🔍 Examining path: {}", path.display());
-                        
-                        // Check if file exists
-                        if !path.exists() {
-                            info!("❌ File doesn't exist: {}", path.display());
+                // Skip hidden/temporary files (starting with .)
+                if let Some(name) = path.file_name() {
+                    let name_str = name.to_string_lossy();
+                    if name_str.starts_with('.') {
+                        info!("⏭️ Skipping hidden/temp file: {}", path.display());
+                        continue;
+                    }
+                }
+                
+                // Check if file exists
+                if !path.exists() {
+                    info!("❌ File doesn't exist: {}", path.display());
+                    continue;
+                }
+                
+                // Check if it's a screenshot file
+                if Self::is_screenshot_file(&path) {
+                    info!("📸 Screenshot file detected: {}", path.display());
+                    
+                    // Check for duplicates BEFORE sending to queue
+                    {
+                        let mut processed = processed_files_watcher.lock().unwrap();
+                        if processed.contains(&path) {
+                            info!("🔄 Skipping already queued file: {}", path.display());
                             continue;
                         }
+                        processed.insert(path.clone());
+                    }
+                    
+                    // Send to async task for processing
+                    if let Err(e) = tx.send(path.clone()) {
+                        error!("Failed to send file path for processing: {}", e);
+                    } else {
+                        info!("✉️ Sent to processing queue: {}", path.display());
                         
-                        // Check if it's a screenshot file
-                        if Self::is_screenshot_file(&path) {
-                            info!("📸 Screenshot file detected: {}", path.display());
-                            
-                            // Check for duplicates BEFORE sending to queue
-                            {
-                                let mut processed = processed_files_watcher.lock().unwrap();
-                                if processed.contains(&path) {
-                                    info!("🔄 Skipping already queued file: {}", path.display());
-                                    continue;
-                                }
-                                processed.insert(path.clone());
-                            }
-                            
-                            // Send to async task for processing
-                            if let Err(e) = tx.send(path.clone()) {
-                                error!("Failed to send file path for processing: {}", e);
-                            } else {
-                                info!("✉️ Sent to processing queue: {}", path.display());
-                                
-                                // Clean up tracking after 30 seconds
-                                let processed_files_cleanup = processed_files_watcher.clone();
-                                let path_cleanup = path.clone();
-                                std::thread::spawn(move || {
-                                    std::thread::sleep(Duration::from_secs(30));
-                                    let mut processed = processed_files_cleanup.lock().unwrap();
-                                    processed.remove(&path_cleanup);
-                                    info!("🧹 Cleaned up tracking for: {}", path_cleanup.display());
-                                });
-                            }
-                        } else {
-                            info!("❌ Not a screenshot file: {}", path.display());
-                        }
+                        // Clean up tracking after 30 seconds
+                        let processed_files_cleanup = processed_files_watcher.clone();
+                        let path_cleanup = path.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_secs(30));
+                            let mut processed = processed_files_cleanup.lock().unwrap();
+                            processed.remove(&path_cleanup);
+                            info!("🧹 Cleaned up tracking for: {}", path_cleanup.display());
+                        });
                     }
                 } else {
-                    info!("⏭️ Ignoring event type: {:?}", event.kind);
+                    info!("❌ Not a screenshot file: {}", path.display());
                 }
-            } else {
-                error!("File system watcher error: {:?}", res);
             }
-        })?;
+        } else {
+            info!("⏭️ Ignoring event type: {:?}", event.kind);
+        }
+    } else {
+        error!("File system watcher error: {:?}", res);
+    }
+})?;
 
         let desktop_path = dirs::desktop_dir().unwrap_or_else(|| {
             dirs::home_dir()
@@ -756,8 +805,8 @@ impl DesktopWatcher {
         processor: &ScreenshotProcessor,
         path: &Path,
     ) -> Result<()> {
-        // Wait a bit longer for file to be fully written and renamed
-        sleep(Duration::from_millis(1000)).await;
+        // Wait a bit longer for file to be fully written
+        sleep(Duration::from_millis(1500)).await;
 
         if !path.exists() {
             return Err(anyhow!("File not found: {}", path.display()));
@@ -784,7 +833,7 @@ impl DesktopWatcher {
             .process_screenshot(&image_base64, Some(metadata))
             .await?;
 
-        // Emit event to frontend for desktop auto-detected screenshots
+        // Emit event to frontend for desktop auto-detected screenshots WITH image data
         if let Some(app_handle) = APP_HANDLE.get() {
             if let Some(window) = app_handle.get_window("main") {
                 let screenshot_data = serde_json::json!({
@@ -795,7 +844,8 @@ impl DesktopWatcher {
                     "timestamp": result.timestamp,
                     "status": "completed",
                     "analysis": result.summary.as_ref().unwrap_or(&"".to_string()),
-                    "source": result.source.as_ref().unwrap_or(&"desktop_auto".to_string())
+                    "source": result.source.as_ref().unwrap_or(&"desktop_auto".to_string()),
+                    "imageData": image_base64  // Include the image data in the emit
                 });
                 
                 let _ = window.emit("screenshot-processed", screenshot_data);

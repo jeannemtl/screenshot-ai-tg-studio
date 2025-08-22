@@ -1,4 +1,4 @@
-/* Updated CSS with Teal Color Scheme */
+/* Complete CSS for Screenshot AI Studio with Image Viewer */
 
 /* Reset and base styles */
 * {
@@ -163,6 +163,29 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   box-shadow: 0 2px 8px rgba(64, 224, 208, 0.3);
+}
+
+.test-btn {
+  background: transparent;
+  color: var(--spotify-text-secondary);
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--spotify-border);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.test-btn:hover {
+  background: var(--spotify-card);
+  color: var(--primary-teal);
+  border-color: var(--primary-teal);
 }
 
 /* Main layout */
@@ -357,7 +380,7 @@ body {
   }
 }
 
-/* Screenshot cards with teal accents */
+/* Screenshot cards with teal accents and image support */
 .screenshot-card {
   background: var(--spotify-card);
   border-radius: 8px;
@@ -375,7 +398,7 @@ body {
   border-color: var(--primary-teal);
 }
 
-/* Screenshot image */
+/* Screenshot image container */
 .screenshot-image {
   width: 100%;
   height: 200px;
@@ -387,10 +410,30 @@ body {
   overflow: hidden;
 }
 
+/* Real image styling */
+.screenshot-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transition: transform 0.3s ease;
+}
+
+.screenshot-card:hover .screenshot-image img {
+  transform: scale(1.05);
+}
+
+/* Fallback gradient when no image */
 .screenshot-image::before {
   content: '📸';
   font-size: 48px;
   opacity: 0.3;
+  position: absolute;
+  z-index: 1;
+}
+
+.screenshot-image img + ::before {
+  display: none;
 }
 
 .screenshot-content {
@@ -418,6 +461,7 @@ body {
   margin-bottom: 12px;
   font-size: 12px;
   color: var(--spotify-text-secondary);
+  flex-wrap: wrap;
 }
 
 .screenshot-status {
@@ -437,6 +481,11 @@ body {
   background: #ef5350;
 }
 
+.file-size {
+  font-size: 10px;
+  color: var(--spotify-text-muted);
+}
+
 .screenshot-source {
   background: rgba(64, 224, 208, 0.2);
   padding: 2px 8px;
@@ -446,6 +495,11 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--primary-teal);
+}
+
+.status-with-icon {
+  font-size: 10px;
+  color: var(--spotify-text-muted);
 }
 
 .screenshot-time {
@@ -503,6 +557,16 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.expand-btn:hover {
+  background: rgba(64, 224, 208, 0.2);
 }
 
 /* Processing status with teal */
@@ -578,6 +642,241 @@ body {
   font-size: 16px;
 }
 
+/* IMAGE VIEWER MODAL STYLES */
+.image-viewer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+}
+
+.image-viewer-container {
+  background: var(--spotify-darker);
+  border-radius: 12px;
+  width: 90vw;
+  height: 90vh;
+  max-width: 1200px;
+  max-height: 800px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--spotify-border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+
+/* Image Viewer Header */
+.image-viewer-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--spotify-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--spotify-sidebar);
+}
+
+.image-viewer-info h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--spotify-text-primary);
+  margin-bottom: 4px;
+}
+
+.image-viewer-info p {
+  font-size: 14px;
+  color: var(--spotify-text-secondary);
+}
+
+.image-viewer-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.image-viewer-controls button {
+  background: var(--spotify-card);
+  border: 1px solid var(--spotify-border);
+  color: var(--spotify-text-secondary);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.image-viewer-controls button:hover:not(:disabled) {
+  background: var(--spotify-card-hover);
+  color: var(--spotify-text-primary);
+  border-color: var(--primary-teal);
+}
+
+.image-viewer-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.zoom-level {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-teal);
+  min-width: 50px;
+  text-align: center;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--spotify-border);
+}
+
+.close-btn {
+  background: transparent !important;
+  border: none !important;
+  color: var(--spotify-text-secondary) !important;
+  padding: 8px !important;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: var(--spotify-text-primary) !important;
+}
+
+/* Image Viewer Content */
+.image-viewer-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: var(--spotify-dark);
+}
+
+.image-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.image-container img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform 0.2s ease;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.image-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--spotify-text-muted);
+}
+
+.image-placeholder span {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.image-placeholder p {
+  font-size: 16px;
+}
+
+/* Analysis Panel */
+.image-viewer-analysis {
+  padding: 20px 24px;
+  background: var(--spotify-card);
+  border-top: 1px solid var(--spotify-border);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.image-viewer-analysis h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--spotify-text-primary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.image-viewer-analysis h3::before {
+  content: '🧠';
+  font-size: 18px;
+}
+
+.image-viewer-analysis p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--spotify-text-secondary);
+}
+
+/* Settings cards styling */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.settings-card {
+  background: var(--spotify-card);
+  border-radius: 8px;
+  padding: 24px;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.settings-card:hover {
+  border-color: var(--primary-teal);
+  box-shadow: 0 4px 15px rgba(64, 224, 208, 0.2);
+}
+
+.settings-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--spotify-text-primary);
+  margin-bottom: 8px;
+}
+
+.settings-card p {
+  color: var(--spotify-text-secondary);
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.settings-btn {
+  background: var(--primary-gradient);
+  color: var(--spotify-text-primary);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settings-btn:hover {
+  background: var(--primary-gradient-hover);
+  transform: translateY(-1px);
+}
+
 /* Typography overrides */
 .text-white { color: var(--spotify-text-primary) !important; }
 .text-gray-400 { color: var(--spotify-text-secondary) !important; }
@@ -622,6 +921,52 @@ h1, h2, h3, h4, h5, h6 {
   100% { transform: translateX(100%); }
 }
 
+/* Responsive Design for Image Viewer */
+@media (max-width: 768px) {
+  .image-viewer-container {
+    width: 95vw;
+    height: 95vh;
+    border-radius: 8px;
+  }
+  
+  .image-viewer-header {
+    padding: 16px 20px;
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  
+  .image-viewer-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .image-viewer-controls button {
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+  
+  .zoom-level {
+    font-size: 12px;
+  }
+  
+  .image-viewer-analysis {
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .image-viewer-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .image-viewer-controls button {
+    flex: 1;
+    min-width: 60px;
+  }
+}
+
 /* Spacing utilities */
 .space-y-3 > * + * { margin-top: 12px; }
 .space-y-4 > * + * { margin-top: 16px; }
@@ -654,6 +999,24 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 ::-webkit-scrollbar-thumb:hover {
+  background: var(--spotify-text-muted);
+}
+
+/* Custom scrollbar for analysis panel */
+.image-viewer-analysis::-webkit-scrollbar {
+  width: 6px;
+}
+
+.image-viewer-analysis::-webkit-scrollbar-track {
+  background: var(--spotify-sidebar);
+}
+
+.image-viewer-analysis::-webkit-scrollbar-thumb {
+  background: var(--spotify-border);
+  border-radius: 3px;
+}
+
+.image-viewer-analysis::-webkit-scrollbar-thumb:hover {
   background: var(--spotify-text-muted);
 }
 
@@ -703,28 +1066,4 @@ h1, h2, h3, h4, h5, h6 {
 /* Override any light theme remnants */
 * {
   color: inherit;
-}
-
-/* Test button styling */
-.test-btn {
-  background: transparent;
-  color: var(--spotify-text-secondary);
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid var(--spotify-border);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.test-btn:hover {
-  background: var(--spotify-card);
-  color: var(--primary-teal);
-  border-color: var(--primary-teal);
 }
