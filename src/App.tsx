@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings, BarChart3, Server } from 'lucide-react';
+import { Settings, BarChart3, Server, Upload, Activity } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 
@@ -19,6 +19,7 @@ interface Screenshot {
   timestamp: string;
   status: 'processing' | 'completed' | 'error';
   analysis?: string;
+  source?: string;
 }
 
 interface ProcessingResponse {
@@ -40,48 +41,87 @@ function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('gallery');
 
   // Load existing screenshots and listen for new ones
-  useEffect(() => {
-    // Load existing screenshots
-    const loadScreenshots = async () => {
-      try {
-        const existing = await invoke<any[]>('get_recent_screenshots');
-        setScreenshots(existing.map(item => ({
-          id: item.id,
-          name: item.name,
-          size: item.size,
-          type: item.type,
-          timestamp: item.timestamp,
-          status: item.status,
-          analysis: item.analysis
-        })));
-      } catch (error) {
-        console.error('Failed to load screenshots:', error);
-      }
-    };
+  // In your src/App.tsx, modify the useEffect to add logging:
 
-    // Listen for new screenshots being processed
-    const setupListener = async () => {
-      const unlisten = await listen('screenshot-processed', (event) => {
-        const screenshotData = event.payload as any;
-        const newScreenshot: Screenshot = {
-          id: screenshotData.id,
-          name: screenshotData.name,
-          size: screenshotData.size,
-          type: screenshotData.type,
-          timestamp: screenshotData.timestamp,
-          status: screenshotData.status,
-          analysis: screenshotData.analysis
-        };
+  // Replace the useEffect in your App.tsx with this fixed version:
+
+useEffect(() => {
+  let unlistenFunction: (() => void) | null = null;
+
+  // Load existing screenshots
+  const loadScreenshots = async () => {
+    try {
+      const existing = await invoke<any[]>('get_recent_screenshots');
+      console.log('🔍 Loaded existing screenshots:', existing.length, existing);
+      setScreenshots(existing.map(item => ({
+        id: item.id,
+        name: item.name,
+        size: item.size,
+        type: item.type,
+        timestamp: item.timestamp,
+        status: item.status,
+        analysis: item.analysis,
+        source: item.source
+      })));
+    } catch (error) {
+      console.error('Failed to load screenshots:', error);
+    }
+  };
+
+  // Listen for new screenshots being processed
+  const setupListener = async () => {
+    const unlisten = await listen('screenshot-processed', (event) => {
+      console.log('📸 Received screenshot-processed event:', event.payload);
+      
+      const screenshotData = event.payload as any;
+      const newScreenshot: Screenshot = {
+        id: screenshotData.id,
+        name: screenshotData.name,
+        size: screenshotData.size,
+        type: screenshotData.type,
+        timestamp: screenshotData.timestamp,
+        status: screenshotData.status || 'completed',
+        analysis: screenshotData.analysis,
+        source: screenshotData.source || 'desktop_auto'
+      };
+      
+      console.log('📸 Adding new screenshot to state:', newScreenshot);
+      
+      setScreenshots(prev => {
+        console.log('📸 Current screenshots in setter:', prev.length);
         
-        setScreenshots(prev => [newScreenshot, ...prev]);
+        // Check for duplicates by ID to prevent adding the same screenshot twice
+        const isDuplicate = prev.some(existing => existing.id === newScreenshot.id);
+        if (isDuplicate) {
+          console.log('🔄 Skipping duplicate screenshot with ID:', newScreenshot.id);
+          return prev;
+        }
+        
+        const updated = [newScreenshot, ...prev];
+        console.log('📸 New screenshots count after add:', updated.length);
+        return updated;
       });
+    });
 
-      return unlisten;
-    };
+    unlistenFunction = unlisten;
+    return unlisten;
+  };
 
-    loadScreenshots();
-    setupListener();
-  }, []);
+  const initializeApp = async () => {
+    await loadScreenshots();
+    await setupListener();
+  };
+
+  initializeApp();
+
+  // Cleanup function
+  return () => {
+    if (unlistenFunction) {
+      console.log('🧹 Cleaning up screenshot event listener');
+      unlistenFunction();
+    }
+  };
+}, []); // Empty dependency array is correct here
 
   // Handle file uploads with new Rust backend
   const handleFilesDropped = useCallback(async (files: FileList) => {
@@ -101,7 +141,8 @@ function App() {
         size: file.size,
         type: file.type,
         timestamp: new Date().toISOString(),
-        status: 'processing'
+        status: 'processing',
+        source: 'frontend_upload'
       };
 
       // Add to state
@@ -210,6 +251,24 @@ function App() {
     }
   };
 
+  const getDisplayName = (name: string) => {
+    return name.length > 30 ? name.slice(0, 30) + '...' : name;
+  };
+
+  const getRandomGradient = () => {
+    const gradients = [
+      '#667eea, #764ba2',
+      '#f093fb, #f5576c',
+      '#4facfe, #00f2fe',
+      '#43e97b, #38f9d7',
+      '#fa709a, #fee140',
+      '#a8edea, #fed6e3',
+      '#ff9a9e, #fecfef',
+      '#ffecd2, #fcb69f'
+    ];
+    return gradients[Math.floor(Math.random() * gradients.length)];
+  };
+
   return (
     <div className="min-h-screen">
       {/* Spotify-style Header */}
@@ -271,552 +330,325 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="main-content">
-        <AnimatePresence mode="wait">
-          {activeTab === 'gallery' && (
-            <motion.div
-              key="gallery"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
-            >
-              {/* Drop Zone */}
-              <DropZone onFilesDropped={handleFilesDropped} />
+      {/* Main Container with Sidebar */}
+      <div className="main-container">
+        {/* Spotify-style Sidebar */}
+        <aside className="sidebar">
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Your Library</h3>
+            <ul className="sidebar-links">
+              <li><a href="#" className="active">Recently Processed</a></li>
+              <li><a href="#">Liked Screenshots</a></li>
+              <li><a href="#">Downloaded</a></li>
+            </ul>
+          </div>
 
-              {/* Screenshots Gallery */}
-              {screenshots.length > 0 && (
-                <div>
-                  <div className="section-header">
-                    <h2 className="section-title">Recent Screenshots</h2>
-                    <p className="section-subtitle">
-                      AI-powered analysis of your screenshots
-                    </p>
-                  </div>
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Categories</h3>
+            <ul className="sidebar-links">
+              <li><a href="#">Research Papers</a></li>
+              <li><a href="#">Code Reviews</a></li>
+              <li><a href="#">UI Designs</a></li>
+              <li><a href="#">Data Visualizations</a></li>
+              <li><a href="#">Meeting Notes</a></li>
+              <li><a href="#">Error Logs</a></li>
+              <li><a href="#">Tutorials</a></li>
+              <li><a href="#">Social Media</a></li>
+            </ul>
+          </div>
 
-                  <div className="screenshots-grid">
-                    <AnimatePresence>
-                      {screenshots.map((screenshot) => (
-                        <motion.div
-                          key={screenshot.id}
-                          className="screenshot-card"
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
-                          transition={{ duration: 0.3 }}
-                        >
-                          <div className="screenshot-header">
-                            <div className="screenshot-info">
-                              <h3 className="screenshot-title">{screenshot.name}</h3>
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Quick Actions</h3>
+            <div className="quick-actions">
+              <button className="btn-secondary">
+                <Upload className="w-4 h-4" />
+                Upload Screenshot
+              </button>
+              
+              <button className="btn-secondary">
+                <Settings className="w-4 h-4" />
+                Settings
+              </button>
+              
+              <button 
+                onClick={handleTestGreet}
+                className="btn-secondary"
+              >
+                <Activity className="w-4 h-4" />
+                Test Connection
+              </button>
+
+              <button className="btn-secondary">
+                <BarChart3 className="w-4 h-4" />
+                Analytics
+              </button>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Quick Stats</h3>
+            <div className="stats-grid">
+              <div className="stat-item">
+                <div className="stat-number">{screenshots.length}</div>
+                <div className="stat-label">Processed</div>
+              </div>
+              <div className="stat-item">
+                <div className="stat-number">{processingCount}</div>
+                <div className="stat-label">Processing</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Content Area */}
+        <main className="content">
+          <AnimatePresence mode="wait">
+            {activeTab === 'gallery' && (
+              <motion.div
+                key="gallery"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                {/* Drop Zone */}
+                <DropZone onFilesDropped={handleFilesDropped} />
+
+                {/* Screenshots Gallery */}
+                {screenshots.length > 0 && (
+                  <div>
+                    <div className="section-header">
+                      <h2 className="section-title">Recent Screenshots</h2>
+                      <p className="section-subtitle">
+                        AI-powered analysis of your screenshots
+                      </p>
+                    </div>
+
+                    <div className="screenshots-grid">
+                      <AnimatePresence>
+                        {screenshots.slice(0, 12).map((screenshot) => (
+                          <motion.div
+                            key={screenshot.id}
+                            className="screenshot-card"
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            transition={{ duration: 0.3 }}
+                          >
+                            <div 
+                              className="screenshot-image"
+                              style={{ 
+                                background: `linear-gradient(135deg, ${getRandomGradient()})`
+                              }}
+                            />
+                            
+                            <div className="screenshot-content">
+                              <div className="screenshot-header">
+                                <div className="screenshot-title">{getDisplayName(screenshot.name)}</div>
+                              </div>
+                              
                               <div className="screenshot-meta">
-                                <span className="file-size">
-                                  {formatFileSize(screenshot.size)}
+                                <div 
+                                  className="screenshot-status"
+                                  style={{ backgroundColor: getStatusColor(screenshot.status) }}
+                                />
+                                <span className="file-size">{formatFileSize(screenshot.size)}</span>
+                                <span className="screenshot-source">
+                                  {screenshot.source || 'unknown'}
                                 </span>
-                                <span 
-                                  className="status-indicator"
-                                  style={{ color: getStatusColor(screenshot.status) }}
-                                >
+                                <span className="status-with-icon">
                                   {getStatusIcon(screenshot.status)} {screenshot.status}
                                 </span>
-                                <div className="timestamp">
+                                <span className="screenshot-time">
                                   {screenshot.status === 'processing' 
                                     ? 'Processing...' 
                                     : formatTime(screenshot.timestamp)
                                   }
+                                </span>
+                              </div>
+                              
+                              {screenshot.analysis && (
+                                <div className="screenshot-analysis">
+                                  {screenshot.analysis}
                                 </div>
+                              )}
+                              
+                              <div className="screenshot-actions">
+                                <button className="action-btn">
+                                  📋 Copy
+                                </button>
+                                <button className="action-btn">
+                                  🔗 Share
+                                </button>
+                                <button className="action-btn">
+                                  ⭐ Save
+                                </button>
+                                <button className="expand-btn">View</button>
                               </div>
                             </div>
-                          </div>
-                          
-                          {screenshot.analysis && (
-                            <div className="screenshot-analysis">
-                              {screenshot.analysis}
-                            </div>
-                          )}
-                          
-                          <div className="screenshot-actions">
-                            <button className="action-btn">
-                              <span>📋</span>
-                              Copy
-                            </button>
-                            <button className="action-btn">
-                              <span>🔗</span>
-                              Share
-                            </button>
-                            <button className="action-btn">
-                              <span>⭐</span>
-                              Save
-                            </button>
-                            <button className="expand-btn">View</button>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Made for You Section (if no screenshots) */}
-              {screenshots.length === 0 && !isProcessing && (
-                <div>
-                  <div className="section-header">
-                    <h2 className="section-title">Made for you</h2>
-                    <p className="section-subtitle">Get started with AI-powered screenshot analysis</p>
-                  </div>
-
+                {/* Made for You Section (if no screenshots) */}
+                {screenshots.length === 0 && !isProcessing && (
                   <motion.div 
                     className="empty-state"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
                   >
-                    <div className="empty-icon">📸</div>
-                    <h3>No screenshots yet</h3>
-                    <p>Drag and drop your screenshots above to get started with AI analysis</p>
-                    
-                    <div className="feature-grid">
-                      <div className="feature-item">
-                        <div className="feature-icon">🤖</div>
-                        <h4>AI Analysis</h4>
-                        <p>Get instant insights about your screenshots</p>
-                      </div>
-                      <div className="feature-item">
-                        <div className="feature-icon">📱</div>
-                        <h4>iOS Integration</h4>
-                        <p>Connect your iPhone for automatic processing</p>
-                      </div>
-                      <div className="feature-item">
-                        <div className="feature-icon">🖥️</div>
-                        <h4>Desktop Auto-Detection</h4>
-                        <p>Automatically process Mac screenshots</p>
-                      </div>
-                    </div>
+                    <div className="empty-state-icon">📸</div>
+                    <h3>Start analyzing your screenshots</h3>
+                    <p>Drop an image above or click upload to get AI-powered insights</p>
                   </motion.div>
+                )}
+
+                {/* Recently Processed Extended Grid */}
+                {screenshots.length > 12 && (
+                  <div style={{ marginTop: '48px' }}>
+                    <div className="section-header">
+                      <h2 className="section-title">More from your library</h2>
+                    </div>
+
+                    <div className="screenshots-grid">
+                      <AnimatePresence>
+                        {screenshots.slice(12).map((screenshot) => (
+                          <motion.div
+                            key={screenshot.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="screenshot-card"
+                          >
+                            <div 
+                              className="screenshot-image"
+                              style={{ 
+                                background: `linear-gradient(135deg, ${getRandomGradient()})`
+                              }}
+                            />
+                            
+                            <div className="screenshot-content">
+                              <div className="screenshot-header">
+                                <div className="screenshot-title">{getDisplayName(screenshot.name)}</div>
+                              </div>
+                              
+                              <div className="screenshot-meta">
+                                <div 
+                                  className="screenshot-status"
+                                  style={{ backgroundColor: getStatusColor(screenshot.status) }}
+                                />
+                                <span className="file-size">{formatFileSize(screenshot.size)}</span>
+                                <span className="screenshot-source">
+                                  {screenshot.source || 'unknown'}
+                                </span>
+                                <span className="status-with-icon">
+                                  {getStatusIcon(screenshot.status)} {screenshot.status}
+                                </span>
+                                <span className="screenshot-time">
+                                  {formatTime(screenshot.timestamp)}
+                                </span>
+                              </div>
+                              
+                              {screenshot.analysis && (
+                                <div className="screenshot-analysis">
+                                  {screenshot.analysis}
+                                </div>
+                              )}
+                              
+                              <div className="screenshot-actions">
+                                <button className="action-btn">
+                                  📋 Copy
+                                </button>
+                                <button className="action-btn">
+                                  🔗 Share
+                                </button>
+                                <button className="action-btn">
+                                  ⭐ Save
+                                </button>
+                                <button className="expand-btn">View</button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {activeTab === 'server' && (
+              <motion.div
+                key="server"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="section-header">
+                  <h2 className="section-title">
+                    <Server size={24} />
+                    Screenshot Server
+                  </h2>
+                  <p className="section-subtitle">
+                    Configure and manage your AI screenshot processing server
+                  </p>
                 </div>
-              )}
-            </motion.div>
-          )}
+                <ServerConfig />
+              </motion.div>
+            )}
 
-          {activeTab === 'server' && (
-            <motion.div
-              key="server"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
-            >
-              <div className="section-header">
-                <h2 className="section-title">
-                  <Server size={24} />
-                  Screenshot Server
-                </h2>
-                <p className="section-subtitle">
-                  Configure and manage your AI screenshot processing server
-                </p>
-              </div>
-              <ServerConfig />
-            </motion.div>
-          )}
-
-          {activeTab === 'settings' && (
-            <motion.div
-              key="settings"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.3 }}
-            >
-              <div className="section-header">
-                <h2 className="section-title">
-                  <Settings size={24} />
-                  Settings
-                </h2>
-                <p className="section-subtitle">
-                  Customize your Screenshot AI Studio experience
-                </p>
-              </div>
-              
-              <div className="settings-grid">
-                <div className="settings-card">
-                  <h3>🎨 Appearance</h3>
-                  <p>Theme and display preferences</p>
-                  <button className="settings-btn">Configure</button>
+            {activeTab === 'settings' && (
+              <motion.div
+                key="settings"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <div className="section-header">
+                  <h2 className="section-title">
+                    <Settings size={24} />
+                    Settings
+                  </h2>
+                  <p className="section-subtitle">
+                    Customize your Screenshot AI Studio experience
+                  </p>
                 </div>
                 
-                <div className="settings-card">
-                  <h3>🔔 Notifications</h3>
-                  <p>Desktop and system notifications</p>
-                  <button className="settings-btn">Configure</button>
+                <div className="settings-grid">
+                  <div className="settings-card">
+                    <h3>🎨 Appearance</h3>
+                    <p>Theme and display preferences</p>
+                    <button className="settings-btn">Configure</button>
+                  </div>
+                  
+                  <div className="settings-card">
+                    <h3>🔔 Notifications</h3>
+                    <p>Desktop and system notifications</p>
+                    <button className="settings-btn">Configure</button>
+                  </div>
+                  
+                  <div className="settings-card">
+                    <h3>🗂️ Storage</h3>
+                    <p>File storage and cleanup options</p>
+                    <button className="settings-btn">Configure</button>
+                  </div>
+                  
+                  <div className="settings-card">
+                    <h3>🔒 Privacy</h3>
+                    <p>Data handling and privacy settings</p>
+                    <button className="settings-btn">Configure</button>
+                  </div>
                 </div>
-                
-                <div className="settings-card">
-                  <h3>🗂️ Storage</h3>
-                  <p>File storage and cleanup options</p>
-                  <button className="settings-btn">Configure</button>
-                </div>
-                
-                <div className="settings-card">
-                  <h3>🔒 Privacy</h3>
-                  <p>Data handling and privacy settings</p>
-                  <button className="settings-btn">Configure</button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
-
-      <style>{`
-        /* Header Styles */
-        .header-container {
-          background: linear-gradient(180deg, #121212 0%, #1e1e1e 100%);
-          border-bottom: 1px solid #333;
-          position: sticky;
-          top: 0;
-          z-index: 100;
-          backdrop-filter: blur(20px);
-        }
-
-        .header-content {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 0 24px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          height: 64px;
-        }
-
-        .nav-left {
-          display: flex;
-          align-items: center;
-          gap: 32px;
-        }
-
-        .logo {
-          font-size: 20px;
-          font-weight: 700;
-          color: white;
-          text-decoration: none;
-          transition: color 0.2s;
-        }
-
-        .logo:hover {
-          color: #00ff88;
-        }
-
-        .nav-links {
-          display: flex;
-          list-style: none;
-          margin: 0;
-          padding: 0;
-          gap: 24px;
-        }
-
-        .nav-links a {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          color: #b3b3b3;
-          text-decoration: none;
-          font-weight: 500;
-          padding: 8px 16px;
-          border-radius: 8px;
-          transition: all 0.2s;
-        }
-
-        .nav-links a:hover,
-        .nav-links a.active {
-          color: white;
-          background: rgba(255, 255, 255, 0.1);
-        }
-
-        .nav-right {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-        }
-
-        .status-badge {
-          background: rgba(0, 255, 136, 0.2);
-          color: #00ff88;
-          padding: 6px 12px;
-          border-radius: 16px;
-          font-size: 12px;
-          font-weight: 500;
-          border: 1px solid rgba(0, 255, 136, 0.3);
-        }
-
-        .test-btn {
-          background: rgba(255, 255, 255, 0.1);
-          color: white;
-          border: 1px solid #333;
-          padding: 8px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .test-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
-        }
-
-        /* Main Content */
-        .main-content {
-          max-width: 1400px;
-          margin: 0 auto;
-          padding: 32px 24px;
-          min-height: calc(100vh - 64px);
-        }
-
-        .section-header {
-          text-align: center;
-          margin-bottom: 48px;
-        }
-
-        .section-title {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          font-size: 48px;
-          font-weight: 900;
-          background: linear-gradient(135deg, #ffffff 0%, #00ff88 100%);
-          background-clip: text;
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          margin: 0 0 16px 0;
-        }
-
-        .section-subtitle {
-          font-size: 18px;
-          color: #b3b3b3;
-          margin: 0;
-          max-width: 600px;
-          margin: 0 auto;
-        }
-
-        /* Screenshots Grid */
-        .screenshots-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-          gap: 24px;
-          margin-top: 48px;
-        }
-
-        .screenshot-card {
-          background: linear-gradient(135deg, #1e1e1e, #2a2a2a);
-          border-radius: 16px;
-          padding: 24px;
-          border: 1px solid #333;
-          transition: all 0.3s;
-        }
-
-        .screenshot-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-          border-color: #00ff88;
-        }
-
-        .screenshot-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 16px;
-        }
-
-        .screenshot-info {
-          flex: 1;
-        }
-
-        .screenshot-title {
-          font-size: 18px;
-          font-weight: 600;
-          color: white;
-          margin: 0 0 8px 0;
-          line-height: 1.3;
-        }
-
-        .screenshot-meta {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          align-items: center;
-        }
-
-        .file-size {
-          color: #888;
-          font-size: 14px;
-        }
-
-        .status-indicator {
-          font-size: 14px;
-          font-weight: 500;
-        }
-
-        .timestamp {
-          color: #888;
-          font-size: 14px;
-        }
-
-        .screenshot-analysis {
-          background: rgba(0, 255, 136, 0.1);
-          border: 1px solid rgba(0, 255, 136, 0.2);
-          border-radius: 12px;
-          padding: 16px;
-          margin-bottom: 16px;
-          color: #e6e6e6;
-          line-height: 1.5;
-          font-size: 14px;
-        }
-
-        .screenshot-actions {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .action-btn {
-          background: rgba(255, 255, 255, 0.1);
-          border: 1px solid #444;
-          color: white;
-          padding: 8px 12px;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: all 0.2s;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 13px;
-        }
-
-        .action-btn:hover {
-          background: rgba(255, 255, 255, 0.2);
-        }
-
-        .expand-btn {
-          background: linear-gradient(135deg, #00ff88, #00cc6a);
-          color: black;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 0.2s;
-          margin-left: auto;
-        }
-
-        .expand-btn:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
-        }
-
-        /* Empty State */
-        .empty-state {
-          text-align: center;
-          max-width: 800px;
-          margin: 0 auto;
-        }
-
-        .empty-icon {
-          font-size: 64px;
-          margin-bottom: 24px;
-        }
-
-        .empty-state h3 {
-          font-size: 24px;
-          color: white;
-          margin: 0 0 12px 0;
-        }
-
-        .empty-state p {
-          color: #888;
-          font-size: 16px;
-          margin: 0 0 32px 0;
-        }
-
-        .feature-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 24px;
-          margin-top: 32px;
-        }
-
-        .feature-item {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 12px;
-          padding: 24px;
-          text-align: center;
-          border: 1px solid #333;
-        }
-
-        .feature-icon {
-          font-size: 32px;
-          margin-bottom: 12px;
-        }
-
-        .feature-item h4 {
-          color: white;
-          margin: 0 0 8px 0;
-          font-size: 16px;
-        }
-
-        .feature-item p {
-          color: #888;
-          margin: 0;
-          font-size: 14px;
-        }
-
-        /* Settings */
-        .settings-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-          gap: 24px;
-          margin-top: 32px;
-        }
-
-        .settings-card {
-          background: linear-gradient(135deg, #1e1e1e, #2a2a2a);
-          border-radius: 16px;
-          padding: 24px;
-          border: 1px solid #333;
-          transition: all 0.3s;
-        }
-
-        .settings-card:hover {
-          transform: translateY(-2px);
-          border-color: #00ff88;
-        }
-
-        .settings-card h3 {
-          color: white;
-          margin: 0 0 8px 0;
-          font-size: 18px;
-        }
-
-        .settings-card p {
-          color: #888;
-          margin: 0 0 16px 0;
-          font-size: 14px;
-        }
-
-        .settings-btn {
-          background: linear-gradient(135deg, #00ff88, #00cc6a);
-          color: black;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 0.2s;
-        }
-
-        .settings-btn:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
-        }
-      `}</style>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </main>
+      </div>
     </div>
   );
 }

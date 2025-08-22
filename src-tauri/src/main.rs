@@ -218,23 +218,15 @@ async fn process_screenshot_direct(
             .await
             .map_err(|e| e.to_string())?;
 
-        // Emit event to frontend with the processed screenshot
-        if let Some(app_handle) = get_app_handle() {
-            if let Some(window) = app_handle.get_window("main") {
-                let screenshot_data = serde_json::json!({
-                    "id": result.analysis_id.as_ref().unwrap_or(&"unknown".to_string()),
-                    "name": format!("screenshot-{}.png", result.analysis_id.as_ref().unwrap_or(&"unknown".to_string())[..8].to_string()),
-                    "size": image_base64.len() * 3 / 4, // Approximate decoded size
-                    "type": "image/png",
-                    "timestamp": result.timestamp,
-                    "status": "completed",
-                    "analysis": result.summary.as_ref().unwrap_or(&"".to_string()),
-                    "source": result.source.as_ref().unwrap_or(&"unknown".to_string())
-                });
-                
-                let _ = window.emit("screenshot-processed", screenshot_data);
-            }
-        }
+        // REMOVE THIS ENTIRE EMIT BLOCK:
+        // (The emit is already handled in lib.rs for desktop screenshots)
+        //
+        // if let Some(app_handle) = get_app_handle() {
+        //     if let Some(window) = app_handle.get_window("main") {
+        //         let screenshot_data = serde_json::json!({...});
+        //         let _ = window.emit("screenshot-processed", screenshot_data);
+        //     }
+        // }
 
         Ok(result)
     } else {

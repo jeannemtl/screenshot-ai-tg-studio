@@ -628,28 +628,77 @@ impl DesktopWatcher {
     pub fn new(processor: ScreenshotProcessor) -> Result<Self> {
         let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
         
-        // Spawn a task to handle file processing
+        // Track recently processed files to avoid duplicates - move this to the watcher level
+        let processed_files = Arc::new(std::sync::Mutex::new(std::collections::HashSet::<PathBuf>::new()));
+        
+        // Spawn a task to handle file processing (simplified - no deduplication here)
         let processor_clone = processor.clone();
         let task_handle = tokio::spawn(async move {
             while let Some(path) = rx.recv().await {
+                info!("🚀 Starting to process screenshot: {}", path.display());
                 if let Err(e) = Self::process_desktop_screenshot(&processor_clone, &path).await {
                     error!("Failed to process desktop screenshot: {}", e);
                 }
             }
         });
 
+        // Clone for use in the watcher closure
+        let processed_files_watcher = processed_files.clone();
+        
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
+                info!("🔍 File system event detected: {:?}", event.kind);
+                
+                // Listen to both Create and Modify events
                 if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                     for path in event.paths {
+                        info!("🔍 Examining path: {}", path.display());
+                        
+                        // Check if file exists
+                        if !path.exists() {
+                            info!("❌ File doesn't exist: {}", path.display());
+                            continue;
+                        }
+                        
+                        // Check if it's a screenshot file
                         if Self::is_screenshot_file(&path) {
-                            // Send to async task for processing
-                            if let Err(e) = tx.send(path) {
-                                error!("Failed to send file path for processing: {}", e);
+                            info!("📸 Screenshot file detected: {}", path.display());
+                            
+                            // Check for duplicates BEFORE sending to queue
+                            {
+                                let mut processed = processed_files_watcher.lock().unwrap();
+                                if processed.contains(&path) {
+                                    info!("🔄 Skipping already queued file: {}", path.display());
+                                    continue;
+                                }
+                                processed.insert(path.clone());
                             }
+                            
+                            // Send to async task for processing
+                            if let Err(e) = tx.send(path.clone()) {
+                                error!("Failed to send file path for processing: {}", e);
+                            } else {
+                                info!("✉️ Sent to processing queue: {}", path.display());
+                                
+                                // Clean up tracking after 30 seconds
+                                let processed_files_cleanup = processed_files_watcher.clone();
+                                let path_cleanup = path.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(Duration::from_secs(30));
+                                    let mut processed = processed_files_cleanup.lock().unwrap();
+                                    processed.remove(&path_cleanup);
+                                    info!("🧹 Cleaned up tracking for: {}", path_cleanup.display());
+                                });
+                            }
+                        } else {
+                            info!("❌ Not a screenshot file: {}", path.display());
                         }
                     }
+                } else {
+                    info!("⏭️ Ignoring event type: {:?}", event.kind);
                 }
+            } else {
+                error!("File system watcher error: {:?}", res);
             }
         })?;
 
