@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Download, Share, Copy, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Download, Copy, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface Screenshot {
   id: string;
