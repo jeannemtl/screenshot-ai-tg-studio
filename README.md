@@ -15,9 +15,10 @@ Unfortunately, it doesn’t persist (I’ll need to build that out if there’s 
 
 <img width="1010" height="989" alt="Screenshot 2025-08-27 at 11 42 09 AM" src="https://github.com/user-attachments/assets/30eb6e78-c092-4638-a390-9781a5a1a4dd" />
 
+<img width="1210" height="797" alt="Screenshot 2025-08-22 at 4 31 23 PM" src="https://github.com/user-attachments/assets/263e34e7-556c-4eb3-a433-1e10c9e00fae" />
+
 <img width="1199" height="803" alt="Screenshot 2025-08-22 at 4 30 53 PM" src="https://github.com/user-attachments/assets/8b4775ec-556d-4f83-b2db-6c241f5935d0" />
 
-<img width="1210" height="797" alt="Screenshot 2025-08-22 at 4 31 23 PM" src="https://github.com/user-attachments/assets/263e34e7-556c-4eb3-a433-1e10c9e00fae" />
 
 
 ## Installation & Setup
