@@ -114,6 +114,8 @@ SERVER_PORT=5001
 2. Click "Configure & Start" in the Server tab
 3. Enter your API keys and preferences
 4. Click "Start Server"
+<img width="1192" height="492" alt="Screenshot 2025-08-27 at 11 16 21 AM" src="https://github.com/user-attachments/assets/ddb85123-a9c2-4d10-abe9-2e6c16d77e67" />
+
 
 ## 📱 iOS Shortcut Setup
 
